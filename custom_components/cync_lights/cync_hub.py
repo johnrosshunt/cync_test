@@ -80,11 +80,13 @@ class CyncHub:
                 try:
                     self.reader, self.writer = await asyncio.open_connection('cm.gelighting.com', 23779, ssl = context)
                 except Exception as e:
+                    _LOGGER.debug("SSL Connection Failed. Using relaxed SSL.")
                     context.check_hostname = False
                     context.verify_mode = ssl.CERT_NONE
                     try:
                         self.reader, self.writer = await asyncio.open_connection('cm.gelighting.com', 23779, ssl = context)
                     except Exception as e:
+                        _LOGGER.debug("Relaxed SSL Connection Failed. Attempting to connect without SSL.")
                         self.reader, self.writer = await asyncio.open_connection('cm.gelighting.com', 23778)
             except Exception as e:
                 _LOGGER.error(e)
@@ -117,10 +119,10 @@ class CyncHub:
     async def _read_tcp_messages(self):
         self.writer.write(self.login_code)
         await self.writer.drain()
-        await self.reader.read(1000)
+        await self.reader.read(1500)
         self.logged_in = True
         while not self.shutting_down:
-            data = await self.reader.read(1000)
+            data = await self.reader.read(1500)
             if len(data) == 0:
                 self.logged_in = False
                 raise LostConnection
@@ -160,7 +162,7 @@ class CyncHub:
                                 switch_id = str(struct.unpack(">I", packet[0:4])[0])
                                 home_id = self.switchID_to_homeID[switch_id]
                                 self._add_connected_devices(switch_id, home_id)
-                                packet = packet[22:]
+                                packet = packet[23:]
                                 while len(packet) > 24:
                                     deviceID = self.home_devices[home_id][int(packet[0])]
                                     if deviceID in self.cync_switches:
@@ -199,26 +201,29 @@ class CyncHub:
                         elif packet_type == 67 and packet_length >= 26 and int(packet[4]) == 1 and int(packet[5]) == 1 and int(packet[6]) == 6:
                             #parse state packet
                             switch_id = str(struct.unpack(">I", packet[0:4])[0])
-                            home_id = self.switchID_to_homeID[switch_id]
-                            packet = packet[7:]
-                            while len(packet) >= 19:
-                                if int(packet[3]) < len(self.home_devices[home_id]):
-                                    deviceID = self.home_devices[home_id][int(packet[3])]
-                                    if deviceID in self.cync_switches:
-                                        if self.cync_switches[deviceID].elements > 1:
-                                            for i in range(self.cync_switches[deviceID].elements):
-                                                device_id = self.home_devices[home_id][(i+1)*256 + int(packet[3])]
-                                                state = int((int(packet[5]) >> i) & int(packet[4])) > 0
-                                                brightness = 100 if state else 0
-                                                self.cync_switches[device_id].update_switch(state,brightness,self.cync_switches[device_id].color_temp,self.cync_switches[device_id].rgb)
-                                        else:
-                                            state = int(packet[4]) > 0
-                                            brightness = int(packet[5]) if state else 0
-                                            color_temp = int(packet[6])
-                                            rgb = {'r':int(packet[7]),'g':int(packet[8]),'b':int(packet[9]),'active':int(packet[6])==254}
-                                            self.cync_switches[deviceID].update_switch(state,brightness,color_temp,rgb)
-                                packet = packet[19:]
-                        elif packet_type == 171:
+                            if switch_id in self.switchID_to_homeID:
+                                home_id = self.switchID_to_homeID[switch_id]
+                                packet = packet[7:]
+                                while packet:
+                                    datapoint_id = packet[0]
+                                    datapoint_length = struct.unpack(">H", packet[1:3])[0] & 0xFFF
+                                    if int(packet[3]) < len(self.home_devices[home_id]):
+                                        deviceID = self.home_devices[home_id][int(packet[3])]
+                                        if deviceID in self.cync_switches:
+                                            if self.cync_switches[deviceID].elements > 1:
+                                                for i in range(self.cync_switches[deviceID].elements):
+                                                    device_id = self.home_devices[home_id][(i+1)*256 + int(packet[3])]
+                                                    state = int((int(packet[5]) >> i) & int(packet[4])) > 0
+                                                    brightness = 100 if state else 0
+                                                    self.cync_switches[device_id].update_switch(state,brightness,self.cync_switches[device_id].color_temp,self.cync_switches[device_id].rgb)
+                                            else:
+                                                state = int(packet[4]) > 0
+                                                brightness = int(packet[5]) if state else 0
+                                                color_temp = int(packet[6])
+                                                rgb = {'r':int(packet[7]),'g':int(packet[8]),'b':int(packet[9]),'active':int(packet[6])==254}
+                                                self.cync_switches[deviceID].update_switch(state,brightness,color_temp,rgb)
+                                    packet = packet[datapoint_length + 3:]
+                        elif packet_type in {168, 171}:
                             switch_id = str(struct.unpack(">I", packet[0:4])[0])
                             home_id = self.switchID_to_homeID[switch_id]
                             self._add_connected_devices(switch_id, home_id)
@@ -290,7 +295,7 @@ class CyncHub:
         for dev in self.cync_switches.values():
             dev.publish_update()
         for room in self.cync_rooms.values():
-            dev.publish_update()
+            room.publish_update()
 
     def send_request(self,request):
         async def send():
