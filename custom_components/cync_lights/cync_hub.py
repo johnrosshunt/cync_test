@@ -80,11 +80,13 @@ class CyncHub:
                 try:
                     self.reader, self.writer = await asyncio.open_connection('cm.gelighting.com', 23779, ssl = context)
                 except Exception as e:
+                    _LOGGER.debug("SSL Connection Failed. Using relaxed SSL.")
                     context.check_hostname = False
                     context.verify_mode = ssl.CERT_NONE
                     try:
                         self.reader, self.writer = await asyncio.open_connection('cm.gelighting.com', 23779, ssl = context)
                     except Exception as e:
+                        _LOGGER.debug("Relaxed SSL Connection Failed. Attempting to connect without SSL.")
                         self.reader, self.writer = await asyncio.open_connection('cm.gelighting.com', 23778)
             except Exception as e:
                 _LOGGER.error(e)
@@ -117,10 +119,10 @@ class CyncHub:
     async def _read_tcp_messages(self):
         self.writer.write(self.login_code)
         await self.writer.drain()
-        await self.reader.read(1000)
+        await self.reader.read(1500)
         self.logged_in = True
         while not self.shutting_down:
-            data = await self.reader.read(1000)
+            data = await self.reader.read(1500)
             if len(data) == 0:
                 self.logged_in = False
                 raise LostConnection
@@ -290,7 +292,7 @@ class CyncHub:
         for dev in self.cync_switches.values():
             dev.publish_update()
         for room in self.cync_rooms.values():
-            dev.publish_update()
+            room.publish_update()
 
     def send_request(self,request):
         async def send():
