@@ -162,7 +162,9 @@ class CyncHub:
                                 switch_id = str(struct.unpack(">I", packet[0:4])[0])
                                 home_id = self.switchID_to_homeID[switch_id]
                                 self._add_connected_devices(switch_id, home_id)
-                                packet = packet[23:]
+                                inner_frame = packet[7:]
+                                inner_frame = inner_frame.replace(b"\x7d\x5e", b"\x7e")
+                                packet = inner_frame[15:]
                                 while len(packet) > 24:
                                     deviceID = self.home_devices[home_id][int(packet[0])]
                                     if deviceID in self.cync_switches:
@@ -204,7 +206,7 @@ class CyncHub:
                             if switch_id in self.switchID_to_homeID:
                                 home_id = self.switchID_to_homeID[switch_id]
                                 packet = packet[7:]
-                                while packet:
+                                while len(packet) > 3:
                                     datapoint_id = packet[0]
                                     datapoint_length = struct.unpack(">H", packet[1:3])[0] & 0xFFF
                                     if int(packet[3]) < len(self.home_devices[home_id]):
