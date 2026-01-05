@@ -1,6 +1,8 @@
 """The Cync Room Lights integration."""
 from __future__ import annotations
 
+import ssl
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from .const import DOMAIN
@@ -10,6 +12,9 @@ PLATFORMS: list[str] = ["light","binary_sensor","switch","fan"]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Cync Room Lights from a config entry."""
+    # Pre-load SSL context to avoid blocking I/O in event loop
+    # The pycync library calls ssl.create_default_context() in async methods
+    await hass.async_add_executor_job(ssl.create_default_context)
 
     hass.data.setdefault(DOMAIN, {})
     remove_options_update_listener = entry.add_update_listener(options_update_listener)
